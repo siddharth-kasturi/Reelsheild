@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">ReelShield</string>
+    <string name="accessibility_description">Blocks short-form video feeds such as Instagram Reels and YouTube Shorts.</string>
+</resources>

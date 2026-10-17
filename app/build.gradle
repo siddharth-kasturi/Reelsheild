@@ -1,0 +1,13 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.reelshield.app'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.reelshield.app'
+        minSdk 26
+        targetSdk 35
+        versionCode 17
+        versionName '1.7-dm-multiapp-smooth'
+    }
+}

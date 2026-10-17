@@ -1,0 +1,27 @@
+﻿# Local Android configuration
+local.properties
+
+# Gradle and build outputs
+.gradle/
+**/build/
+
+# IDE-specific files
+.idea/
+*.iml
+
+# Signing keys and certificates
+*.jks
+*.keystore
+keystore.properties
+*.p12
+*.pfx
+*.pem
+
+# Secrets and environment variables
+.env
+.env.*
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
