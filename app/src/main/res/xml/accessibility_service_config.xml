@@ -4,5 +4,4 @@
     android:notificationTimeout="100"
     android:canRetrieveWindowContent="true"
     android:description="@string/accessibility_description"
-    android:settingsActivity="com.reelshield.app.MainActivity"
-    android:packageNames="com.instagram.android,com.google.android.youtube,com.snapchat.android" />
+    android:settingsActivity="com.reelshield.app.MainActivity" />
