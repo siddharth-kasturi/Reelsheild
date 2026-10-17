@@ -88,7 +88,15 @@ public class ShieldAccessibilityService extends AccessibilityService {
         String pkg = event.getPackageName() == null ? "" : event.getPackageName().toString();
         App incoming = appForPackage(pkg);
         if (incoming == App.NONE) {
-            resetState();
+            int type = event.getEventType();
+
+            // Ignore unrelated app events instead of clearing the overlay.
+            // Recheck the active window only when a window transition occurs.
+            if (app != App.NONE
+                    && (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                    || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED)) {
+                scheduleScan(250L);
+            }
             return;
         }
         if (incoming != app) {
