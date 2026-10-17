@@ -1,28 +1,36 @@
-﻿# ReelShield v1.7 - Smooth Multi-App + Instagram DM Fix
+# ReelShield v1.7 — Smooth Multi-App + Instagram DM Fix
 
-ReelShield blocks supported short-form video surfaces without continuously polling or repeatedly walking large accessibility trees.
+ReelShield is an Android productivity app that helps reduce short-form video scrolling while keeping normal app functionality accessible.
 
 ## Supported apps
-- Instagram: Reels tab, confirmed inline Reels in Home, and Reels opened from DMs/chats.
-- YouTube: Shorts tab and confirmed Shorts surfaces.
-- Snapchat: Spotlight tab and confirmed Spotlight surfaces.
-- Facebook and Facebook Lite: Reels tab and confirmed Reel surfaces.
 
-## Instagram DM Reel fix
-A Reel opened from a chat is treated as a protected Reel session. The blocker is not cleared merely because Instagram exposes the underlying Messages tree. A strong Reel-viewer signature combined with a messaging screen also starts the protected session even when the original click event exposes no useful Reel label. Back/Home remain usable because the overlay is visual-only.
+- **Instagram:** Reels tab and confirmed inline Reels on Home, including Reels opened from chats.
+- **YouTube:** Shorts tab and confirmed Shorts surfaces.
+- **Snapchat:** Spotlight tab and confirmed Spotlight surfaces.
+- **Facebook and Facebook Lite:** Reels tab and confirmed Reel surfaces.
 
-## Smoothness
-- Short-form navigation is blocked immediately from navigation-click events.
-- No continuous polling loop.
-- Accessibility content/scroll events are coalesced.
-- Accessibility tree scans are capped.
-- Safe destinations clear the overlay immediately.
-- Instagram Home keeps its existing inline-Reel detection/skip behavior from v1.6.
+## Instagram DM Reel handling
+
+ReelShield treats a Reel opened from a chat as a protected Reel-viewing session. It avoids clearing the blocker merely because Instagram exposes the underlying messaging interface. Back and Home remain usable because the overlay is visual-only.
+
+## Performance and detection
+
+- Blocks supported short-form navigation through accessibility events.
+- Avoids continuous polling.
+- Coalesces accessibility content and scroll events.
+- Limits accessibility-tree scans.
+- Clears the overlay when a safe destination is detected.
+- Preserves existing Instagram Home inline-Reel detection behavior.
 
 ## Setup
+
 1. Open the project in Android Studio.
-2. Build/install the debug APK.
+2. Build and install the debug APK.
 3. Open ReelShield and enable its Accessibility Service.
 4. Test each supported app independently.
 
-Social apps change their accessibility layouts frequently, so detector adjustments may be needed after app updates.
+Social apps may change their accessibility layouts, so detector adjustments may be needed after app updates.
+
+## Privacy and accessibility
+
+ReelShield uses Android's Accessibility Service to detect supported short-form video interfaces. Review the implementation and test its behavior on your own device before distributing the app.
