@@ -8,10 +8,12 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.util.Log;
 import android.widget.TextView;
 
 import java.util.Locale;
@@ -113,6 +115,10 @@ public class ShieldAccessibilityService extends AccessibilityService {
                 removeBlock();
                 if (clicked == Destination.HOME) {
                     handler.postDelayed(scheduledHomeScan, HOME_SCAN_DELAY_MS);
+                } else {
+                    // Profile, Explore and Messages clicks can open a Reel without
+                    // exposing a useful "Reel" label on the click event itself.
+                    scheduleScan(180L);
                 }
                 return;
             }
@@ -143,8 +149,9 @@ public class ShieldAccessibilityService extends AccessibilityService {
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED
                 || type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
-                || type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
-            scheduleScan(SCAN_DEBOUNCE_MS);
+                || type == AccessibilityEvent.TYPE_VIEW_SCROLLED
+                || type == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            scheduleScan(type == AccessibilityEvent.TYPE_VIEW_CLICKED ? 180L : SCAN_DEBOUNCE_MS);
         }
     }
 
@@ -296,18 +303,12 @@ public class ShieldAccessibilityService extends AccessibilityService {
             inspect(root, sig, new ScanBudget(1400));
 
             if (app == App.INSTAGRAM) {
-                // Critical DM fix: if the current tree looks like Messages AND the
-                // strong Reel viewer signature is present, treat it as the Reel viewer,
-                // not as a safe Messages screen. This also catches cases where the
-                // click event itself exposed no useful "Reel" text.
-                boolean dmReelViewer = sig.reelViewerSignature()
-                        && sig.isMessagingScreen()
-                        && !sig.selectedHome;
-                boolean activeChatSession = sig.reelViewerSignature()
-                        && destination == Destination.CHAT_REEL;
-
-                if (dmReelViewer || activeChatSession) {
-                    destination = Destination.CHAT_REEL;
+                // Detect the Reel viewer independently of its entry point. Instagram
+                // can open the same viewer from Reels, profiles, DMs, feed posts and
+                // Stories, and the click event often contains no useful Reel label.
+                if (sig.reelViewerSignature()) {
+                    destination = sig.isMessagingScreen()
+                            ? Destination.CHAT_REEL : Destination.REELS;
                     showBlock(blockMessage());
                     return;
                 }
@@ -572,7 +573,14 @@ public class ShieldAccessibilityService extends AccessibilityService {
         }
 
         boolean reelViewerSignature() {
-            return largePager > 0 && actionRail() && originalAudio > 0 && seekbar > 0;
+            // Avoid depending on one Instagram widget (ViewPager or SeekBar), since
+            // those differ across entry points and app versions. Require a large
+            // media surface, a Reel-style action rail, and at least one Reel-specific
+            // signal so ordinary full-screen video is less likely to match.
+            boolean mediaSurface = largePager > 0 || (largeMedia > 0 && seekbar > 0);
+            boolean reelSpecific = reelPhrase > 0 || originalAudio > 0
+                    || (reelLabel > 0 && seekbar > 0);
+            return mediaSurface && actionRail() && reelSpecific;
         }
 
         boolean inlineHomeReelSignature() {
@@ -610,18 +618,28 @@ public class ShieldAccessibilityService extends AccessibilityService {
         v.setGravity(Gravity.CENTER);
         v.setBackgroundColor(Color.BLACK);
         v.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        // A visual-only overlay lets taps reach the Reel underneath. Consume touch
+        // input so the blocked content cannot still be interacted with.
+        v.setOnTouchListener(new View.OnTouchListener() {
+            @Override public boolean onTouch(View view, MotionEvent event) {
+                return true;
+            }
+        });
 
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 -3);
         lp.gravity = Gravity.CENTER;
         try {
             windowManager.addView(v, lp);
             blockView = v;
-        } catch (Exception ignored) { }
+            Log.i("ReelShield", "Blocking overlay displayed for " + app);
+        } catch (Exception e) {
+            Log.e("ReelShield", "Unable to display blocking overlay", e);
+        }
     }
 
     private void removeBlock() {
@@ -638,7 +656,11 @@ public class ShieldAccessibilityService extends AccessibilityService {
         destination = Destination.UNKNOWN;
     }
 
-    @Override public void onInterrupt() { resetState(); }
+    @Override public void onInterrupt() {
+        // Android calls this when it interrupts accessibility feedback; it is not
+        // a service-shutdown callback. Clearing app state here can expose a Reel.
+        Log.w("ReelShield", "Accessibility feedback interrupted; preserving block state");
+    }
 
     @Override public void onDestroy() {
         resetState();
