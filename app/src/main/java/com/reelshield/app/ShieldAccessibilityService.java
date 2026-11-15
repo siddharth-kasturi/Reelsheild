@@ -206,6 +206,7 @@ public class ShieldAccessibilityService extends AccessibilityService {
                 if (isChatReelClick(s)) return Destination.CHAT_REEL;
                 if (containsAny(s, "message", "messenger", "inbox", "direct", "chats")) return Destination.MESSAGES;
                 if (isHomeLabel(s)) return Destination.HOME;
+                if (containsAny(s, "create", "new post", "add post", "add to story", "story", "stories", "select from gallery") || s.equals("+")) return Destination.OTHER;
                 if (containsAny(s, "search", "explore", "profile", "notification", "activity")) return Destination.OTHER;
                 break;
 
@@ -344,7 +345,9 @@ public class ShieldAccessibilityService extends AccessibilityService {
                     destination = Destination.MESSAGES;
                 } else if (sig.selectedReels) {
                     destination = Destination.REELS;
-                } else if (sig.selectedHome) {
+                } else if (sig.isStoryViewer() || sig.isCreateFlow()) {
+                    destination = Destination.OTHER;
+                } else if (sig.selectedHome && destination != Destination.OTHER) {
                     destination = Destination.HOME;
                 }
 
@@ -496,6 +499,11 @@ public class ShieldAccessibilityService extends AccessibilityService {
             }
         }
 
+        if (app == App.INSTAGRAM) {
+            if (containsAny(both, "reply", "send message", "close story", "story viewer")) s.storyClues++;
+            if (containsAny(both, "new post", "select from gallery", "write a caption", "add music", "share to")) s.createClues++;
+        }
+
         if (app == App.INSTAGRAM && isMessageClue(text, desc)) s.messageClues++;
         if (cls.endsWith("viewpager") && node.isScrollable() && r.width() >= 650 && r.height() >= 950) s.largePager++;
         if ((cls.endsWith("framelayout") || cls.endsWith("surfaceview")
@@ -575,9 +583,14 @@ public class ShieldAccessibilityService extends AccessibilityService {
         boolean selectedReels, selectedHome, selectedMessages, selectedShortForm, selectedSafe;
         Rect homeTabBounds, reelsTabBounds;
         int messageClues;
+        int storyClues, createClues;
         int largePager, largeMedia, seekbar, originalAudio, reelLabel, shortLabel, shortPhrase;
         int like, comment, repost, share, save, more, reelPhrase;
         int messagesTitle, messageComposer, voiceMessage, gallery, audioCall, videoCall, activeNow, newMessage;
+
+        boolean isStoryViewer() { return storyClues >= 1 && mediaContainer(); }
+
+        boolean isCreateFlow() { return createClues >= 1; }
 
         boolean actionRail() {
             int n = 0;
