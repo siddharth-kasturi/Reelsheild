@@ -792,7 +792,7 @@ public class ShieldAccessibilityService extends AccessibilityService {
         if (height <= 0) return;
 
         TextView v = new TextView(this);
-        v.setText("ReelShield\\nHome feed disabled");
+        v.setText("ReelShield\nHome feed disabled");
         v.setTextSize(21);
         v.setTextColor(Color.WHITE);
         v.setGravity(Gravity.CENTER);
