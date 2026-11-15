@@ -22,7 +22,7 @@ public class MainActivity extends Activity {
         root.setPadding(40, 55, 40, 40);
 
         TextView title = new TextView(this);
-        title.setText("ReelShield — v1.5 Smooth Multi-App");
+        title.setText("ReelShield — v2.0 Focus Mode");
         title.setTextSize(27);
         title.setGravity(Gravity.CENTER);
         root.addView(title, new LinearLayout.LayoutParams(-1, -2));
@@ -39,7 +39,7 @@ public class MainActivity extends Activity {
         root.addView(enable, new LinearLayout.LayoutParams(-1, -2));
 
         TextView info = new TextView(this);
-        info.setText("Smooth multi-app short-form blocker\n\n• Reels tab blocks immediately on navigation\n• Home inline Reels are detected with a coalesced scan\n• Messages/Home clear the blocker immediately\n• No continuous 150 ms accessibility-tree scan while blocked\n• Large accessibility trees are capped to prevent UI hesitation\n• Back and Home remain usable");
+        info.setText("Instagram focus controls\n\n• Home and Reels navigation entries are masked\n• Main Home feed area is covered; Stories are intended to remain available\n• Profile, Messages and Create remain accessible\n• Reels are blocked when detected from supported entry points\n• Back and Home remain usable\n\nOverlay alignment and Instagram compatibility require device testing");
         info.setTextSize(16);
         info.setPadding(0, 20, 0, 20);
         root.addView(info, new LinearLayout.LayoutParams(-1, -2));
