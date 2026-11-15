@@ -3,15 +3,19 @@ package com.reelshield.app;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.graphics.Color;
+import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.util.DisplayMetrics;
+import android.util.Log;
 import android.widget.TextView;
 
 import java.util.Locale;
@@ -39,6 +43,11 @@ public class ShieldAccessibilityService extends AccessibilityService {
 
     private WindowManager windowManager;
     private View blockView;
+    private View homeFeedBlockView;
+    private View homeTabMaskView;
+    private View reelsTabMaskView;
+    private Rect homeTabMaskBounds;
+    private Rect reelsTabMaskBounds;
     private App app = App.NONE;
     private Destination destination = Destination.UNKNOWN;
     private long lastScanAt;
@@ -96,6 +105,8 @@ public class ShieldAccessibilityService extends AccessibilityService {
             destination = Destination.UNKNOWN;
             cancelScans();
             removeBlock();
+            removeNavigationMasks();
+            removeHomeFeedBlock();
         }
 
         if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED) {
@@ -112,7 +123,13 @@ public class ShieldAccessibilityService extends AccessibilityService {
 
                 removeBlock();
                 if (clicked == Destination.HOME) {
+                    removeHomeFeedBlock();
                     handler.postDelayed(scheduledHomeScan, HOME_SCAN_DELAY_MS);
+                } else {
+                    removeHomeFeedBlock();
+                    // Profile, Explore and Messages clicks can open a Reel without
+                    // exposing a useful "Reel" label on the click event itself.
+                    scheduleScan(180L);
                 }
                 return;
             }
@@ -143,8 +160,9 @@ public class ShieldAccessibilityService extends AccessibilityService {
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED
                 || type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
-                || type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
-            scheduleScan(SCAN_DEBOUNCE_MS);
+                || type == AccessibilityEvent.TYPE_VIEW_SCROLLED
+                || type == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            scheduleScan(type == AccessibilityEvent.TYPE_VIEW_CLICKED ? 180L : SCAN_DEBOUNCE_MS);
         }
     }
 
@@ -188,6 +206,7 @@ public class ShieldAccessibilityService extends AccessibilityService {
                 if (isChatReelClick(s)) return Destination.CHAT_REEL;
                 if (containsAny(s, "message", "messenger", "inbox", "direct", "chats")) return Destination.MESSAGES;
                 if (isHomeLabel(s)) return Destination.HOME;
+                if (containsAny(s, "create", "new post", "add post", "add to story", "story", "stories", "select from gallery") || s.equals("+")) return Destination.OTHER;
                 if (containsAny(s, "search", "explore", "profile", "notification", "activity")) return Destination.OTHER;
                 break;
 
@@ -290,24 +309,20 @@ public class ShieldAccessibilityService extends AccessibilityService {
                 app = rootApp;
                 destination = Destination.UNKNOWN;
                 removeBlock();
+                removeNavigationMasks();
+                removeHomeFeedBlock();
             }
 
             Signals sig = new Signals();
             inspect(root, sig, new ScanBudget(1400));
 
             if (app == App.INSTAGRAM) {
-                // Critical DM fix: if the current tree looks like Messages AND the
-                // strong Reel viewer signature is present, treat it as the Reel viewer,
-                // not as a safe Messages screen. This also catches cases where the
-                // click event itself exposed no useful "Reel" text.
-                boolean dmReelViewer = sig.reelViewerSignature()
-                        && sig.isMessagingScreen()
-                        && !sig.selectedHome;
-                boolean activeChatSession = sig.reelViewerSignature()
-                        && destination == Destination.CHAT_REEL;
-
-                if (dmReelViewer || activeChatSession) {
-                    destination = Destination.CHAT_REEL;
+                // Detect the Reel viewer independently of its entry point. Instagram
+                // can open the same viewer from Reels, profiles, DMs, feed posts and
+                // Stories, and the click event often contains no useful Reel label.
+                if (sig.reelViewerSignature()) {
+                    destination = sig.isMessagingScreen()
+                            ? Destination.CHAT_REEL : Destination.REELS;
                     showBlock(blockMessage());
                     return;
                 }
@@ -330,9 +345,18 @@ public class ShieldAccessibilityService extends AccessibilityService {
                     destination = Destination.MESSAGES;
                 } else if (sig.selectedReels) {
                     destination = Destination.REELS;
+                } else if (sig.isStoryViewer() || sig.isCreateFlow()) {
+                    destination = Destination.OTHER;
                 } else if (sig.selectedHome) {
                     destination = Destination.HOME;
                 }
+
+                // Hide the Home and Reels tab hit-targets while leaving Profile,
+                // Messages and Create untouched. The Home feed itself is covered
+                // below while the Stories strip and bottom navigation stay usable.
+                syncNavigationMasks(sig);
+                if (destination == Destination.HOME) showHomeFeedBlock();
+                else removeHomeFeedBlock();
 
                 if (destination == Destination.MESSAGES || destination == Destination.OTHER) {
                     removeBlock();
@@ -464,6 +488,22 @@ public class ShieldAccessibilityService extends AccessibilityService {
             if (isSafeSelected(text, desc)) s.selectedSafe = true;
         }
 
+        if (app == App.INSTAGRAM) {
+            if (isInstagramTabLabel(text, desc, "home")) {
+                Rect tab = clickableBounds(node, r);
+                if (isBottomNavigationBounds(tab)) s.homeTabBounds = tab;
+            }
+            if (isInstagramTabLabel(text, desc, "reels")) {
+                Rect tab = clickableBounds(node, r);
+                if (isBottomNavigationBounds(tab)) s.reelsTabBounds = tab;
+            }
+        }
+
+        if (app == App.INSTAGRAM) {
+            if (containsAny(both, "reply", "send message", "close story", "story viewer")) s.storyClues++;
+            if (containsAny(both, "new post", "select from gallery", "write a caption", "add music", "share to")) s.createClues++;
+        }
+
         if (app == App.INSTAGRAM && isMessageClue(text, desc)) s.messageClues++;
         if (cls.endsWith("viewpager") && node.isScrollable() && r.width() >= 650 && r.height() >= 950) s.largePager++;
         if ((cls.endsWith("framelayout") || cls.endsWith("surfaceview")
@@ -541,10 +581,16 @@ public class ShieldAccessibilityService extends AccessibilityService {
 
     private static class Signals {
         boolean selectedReels, selectedHome, selectedMessages, selectedShortForm, selectedSafe;
+        Rect homeTabBounds, reelsTabBounds;
         int messageClues;
+        int storyClues, createClues;
         int largePager, largeMedia, seekbar, originalAudio, reelLabel, shortLabel, shortPhrase;
         int like, comment, repost, share, save, more, reelPhrase;
         int messagesTitle, messageComposer, voiceMessage, gallery, audioCall, videoCall, activeNow, newMessage;
+
+        boolean isStoryViewer() { return storyClues >= 1 && mediaContainer(); }
+
+        boolean isCreateFlow() { return createClues >= 1; }
 
         boolean actionRail() {
             int n = 0;
@@ -572,7 +618,14 @@ public class ShieldAccessibilityService extends AccessibilityService {
         }
 
         boolean reelViewerSignature() {
-            return largePager > 0 && actionRail() && originalAudio > 0 && seekbar > 0;
+            // Avoid depending on one Instagram widget (ViewPager or SeekBar), since
+            // those differ across entry points and app versions. Require a large
+            // media surface, a Reel-style action rail, and at least one Reel-specific
+            // signal so ordinary full-screen video is less likely to match.
+            boolean mediaSurface = largePager > 0 || (largeMedia > 0 && seekbar > 0);
+            boolean reelSpecific = reelPhrase > 0 || originalAudio > 0
+                    || (reelLabel > 0 && seekbar > 0);
+            return mediaSurface && actionRail() && reelSpecific;
         }
 
         boolean inlineHomeReelSignature() {
@@ -602,6 +655,8 @@ public class ShieldAccessibilityService extends AccessibilityService {
     }
 
     private void showBlock(String message) {
+        removeHomeFeedBlock();
+        removeNavigationMasks();
         if (windowManager == null || blockView != null) return;
         TextView v = new TextView(this);
         v.setText(message);
@@ -610,18 +665,179 @@ public class ShieldAccessibilityService extends AccessibilityService {
         v.setGravity(Gravity.CENTER);
         v.setBackgroundColor(Color.BLACK);
         v.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        // A visual-only overlay lets taps reach the Reel underneath. Consume touch
+        // input so the blocked content cannot still be interacted with.
+        v.setOnTouchListener(new View.OnTouchListener() {
+            @Override public boolean onTouch(View view, MotionEvent event) {
+                return true;
+            }
+        });
 
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 -3);
         lp.gravity = Gravity.CENTER;
         try {
             windowManager.addView(v, lp);
             blockView = v;
-        } catch (Exception ignored) { }
+            Log.i("ReelShield", "Blocking overlay displayed for " + app);
+        } catch (Exception e) {
+            Log.e("ReelShield", "Unable to display blocking overlay", e);
+        }
+    }
+
+    private boolean isInstagramTabLabel(String text, String desc, String tab) {
+        return text.equals(tab) || desc.equals(tab)
+                || text.equals(tab + " tab") || desc.equals(tab + " tab")
+                || text.equals(tab + " navigation") || desc.equals(tab + " navigation");
+    }
+
+    private Rect clickableBounds(AccessibilityNodeInfo node, Rect fallback) {
+        AccessibilityNodeInfo current = node;
+        boolean ownsCurrent = false;
+        for (int depth = 0; depth < 4 && current != null; depth++) {
+            if (current.isClickable()) {
+                Rect bounds = new Rect();
+                current.getBoundsInScreen(bounds);
+                if (!bounds.isEmpty()) {
+                    if (ownsCurrent) current.recycle();
+                    return bounds;
+                }
+            }
+            AccessibilityNodeInfo parent = current.getParent();
+            if (ownsCurrent) current.recycle();
+            current = parent;
+            ownsCurrent = true;
+        }
+        if (ownsCurrent && current != null) current.recycle();
+        return new Rect(fallback);
+    }
+
+    private DisplayMetrics realScreenMetrics() {
+        DisplayMetrics metrics = new DisplayMetrics();
+        if (windowManager != null) {
+            windowManager.getDefaultDisplay().getRealMetrics(metrics);
+        } else {
+            metrics.setTo(getResources().getDisplayMetrics());
+        }
+        return metrics;
+    }
+
+    private boolean isBottomNavigationBounds(Rect bounds) {
+        if (bounds == null || bounds.isEmpty()) return false;
+        DisplayMetrics metrics = realScreenMetrics();
+        return bounds.centerY() >= metrics.heightPixels * 0.72f
+                && bounds.centerY() <= metrics.heightPixels * 0.98f
+                && bounds.width() <= metrics.widthPixels * 0.40f;
+    }
+
+    private void syncNavigationMasks(Signals signals) {
+        if (windowManager == null) return;
+        if (signals.homeTabBounds != null) {
+            if (homeTabMaskView == null || homeTabMaskBounds == null
+                    || !homeTabMaskBounds.equals(signals.homeTabBounds)) {
+                removeSingleOverlay(homeTabMaskView);
+                homeTabMaskView = addNavigationMask(signals.homeTabBounds);
+                homeTabMaskBounds = homeTabMaskView == null ? null : new Rect(signals.homeTabBounds);
+            }
+        }
+        if (signals.reelsTabBounds != null) {
+            if (reelsTabMaskView == null || reelsTabMaskBounds == null
+                    || !reelsTabMaskBounds.equals(signals.reelsTabBounds)) {
+                removeSingleOverlay(reelsTabMaskView);
+                reelsTabMaskView = addNavigationMask(signals.reelsTabBounds);
+                reelsTabMaskBounds = reelsTabMaskView == null ? null : new Rect(signals.reelsTabBounds);
+            }
+        }
+    }
+
+    private View addNavigationMask(Rect bounds) {
+        if (bounds == null || bounds.isEmpty() || windowManager == null) return null;
+        View mask = new View(this);
+        int nightMode = getResources().getConfiguration().uiMode
+                & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
+        mask.setBackgroundColor(nightMode == android.content.res.Configuration.UI_MODE_NIGHT_YES
+                ? Color.BLACK : Color.WHITE);
+        mask.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        mask.setOnTouchListener(new View.OnTouchListener() {
+            @Override public boolean onTouch(View view, MotionEvent event) { return true; }
+        });
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                bounds.width(), bounds.height(),
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT);
+        lp.gravity = Gravity.TOP | Gravity.LEFT;
+        lp.x = bounds.left;
+        lp.y = bounds.top;
+        try {
+            windowManager.addView(mask, lp);
+            return mask;
+        } catch (Exception e) {
+            Log.e("ReelShield", "Unable to mask Instagram navigation tab", e);
+            return null;
+        }
+    }
+
+    private void showHomeFeedBlock() {
+        if (windowManager == null || homeFeedBlockView != null) return;
+        DisplayMetrics metrics = realScreenMetrics();
+        int top = Math.round(metrics.heightPixels * 0.20f);
+        int bottom = Math.round(metrics.heightPixels * 0.105f);
+        int height = metrics.heightPixels - top - bottom;
+        if (height <= 0) return;
+
+        TextView v = new TextView(this);
+        v.setText("ReelShield\nHome feed disabled");
+        v.setTextSize(21);
+        v.setTextColor(Color.WHITE);
+        v.setGravity(Gravity.CENTER);
+        v.setBackgroundColor(Color.BLACK);
+        v.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        v.setOnTouchListener(new View.OnTouchListener() {
+            @Override public boolean onTouch(View view, MotionEvent event) { return true; }
+        });
+
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                metrics.widthPixels, height,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT);
+        lp.gravity = Gravity.TOP | Gravity.LEFT;
+        lp.x = 0;
+        lp.y = top;
+        try {
+            windowManager.addView(v, lp);
+            homeFeedBlockView = v;
+            Log.i("ReelShield", "Instagram Home feed area disabled");
+        } catch (Exception e) {
+            Log.e("ReelShield", "Unable to cover Instagram Home feed", e);
+        }
+    }
+
+    private void removeSingleOverlay(View view) {
+        if (windowManager != null && view != null) {
+            try { windowManager.removeView(view); } catch (Exception ignored) { }
+        }
+    }
+
+    private void removeNavigationMasks() {
+        removeSingleOverlay(homeTabMaskView);
+        removeSingleOverlay(reelsTabMaskView);
+        homeTabMaskView = null;
+        reelsTabMaskView = null;
+        homeTabMaskBounds = null;
+        reelsTabMaskBounds = null;
+    }
+
+    private void removeHomeFeedBlock() {
+        removeSingleOverlay(homeFeedBlockView);
+        homeFeedBlockView = null;
     }
 
     private void removeBlock() {
@@ -634,11 +850,17 @@ public class ShieldAccessibilityService extends AccessibilityService {
     private void resetState() {
         cancelScans();
         removeBlock();
+        removeNavigationMasks();
+        removeHomeFeedBlock();
         app = App.NONE;
         destination = Destination.UNKNOWN;
     }
 
-    @Override public void onInterrupt() { resetState(); }
+    @Override public void onInterrupt() {
+        // Android calls this when it interrupts accessibility feedback; it is not
+        // a service-shutdown callback. Clearing app state here can expose a Reel.
+        Log.w("ReelShield", "Accessibility feedback interrupted; preserving block state");
+    }
 
     @Override public void onDestroy() {
         resetState();
