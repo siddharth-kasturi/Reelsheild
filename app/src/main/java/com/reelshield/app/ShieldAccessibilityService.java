@@ -347,7 +347,7 @@ public class ShieldAccessibilityService extends AccessibilityService {
                     destination = Destination.REELS;
                 } else if (sig.isStoryViewer() || sig.isCreateFlow()) {
                     destination = Destination.OTHER;
-                } else if (sig.selectedHome && destination != Destination.OTHER) {
+                } else if (sig.selectedHome) {
                     destination = Destination.HOME;
                 }
 
